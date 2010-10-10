@@ -1,0 +1,9 @@
+PKG=YUGUIruby
+NAME=ruby - An object-oriented language for quick and easy programming.
+ARCH=solaris
+CATEGORY=application
+VERSION=1.9.2
+VENDOR=http://www.ruby-lang.org
+HOTLINE=on your risk
+EMAIL=on your risk
+DESC=unoffical package of ruby

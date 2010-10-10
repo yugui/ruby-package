@@ -1,0 +1,8 @@
+<%# -*- encoding: US-ASCII -*- %>
+#!/bin/sh
+for file in <%=editable_files.join(" ")%>; do
+	path=$BASEDIR/$file
+	tmp_path=/tmp/`basename $file`
+	sed -e "s!##PREFIX##!$BASEDIR!" < $path > $tmp_path
+	mv $tmp_path $path
+done

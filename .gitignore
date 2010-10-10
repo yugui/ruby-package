@@ -1,0 +1,6 @@
+.*.swp
+/prototype.*
+/postinstall
+/ruby-?.?.?-p*.tar.gz
+/ruby-?.?.?-p*
+/destroot
