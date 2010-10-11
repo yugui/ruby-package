@@ -1,7 +1,25 @@
-TMP_DIR = File.expand_path('./destroot')
-TARGET_VERSION = '1.9.2-p0'
-TARBALL = "ruby-#{TARGET_VERSION}.tar.gz"
+TARGET_VERSION = '1.9.2-p0'.freeze
+
+TMP_DIR = File.expand_path('./destroot').freeze
+TARBALL = "ruby-#{TARGET_VERSION}.tar.gz".freeze
+PACKAGES = %w[ ruby rubydoc rubytk rubydev goruby ].freeze
+PROTOTYPES = PACKAGES.map {|pkg| "prototype.#{pkg}" }.freeze
+
 autoload :ERB, 'erb'
+
+def open_files(*specs, &block)
+  ios = []
+  begin
+    specs.each do |args|
+      ios << File.open(*args)
+    end
+    block.call(*ios)
+  ensure
+    ios.each do |io|
+      io.close rescue nil
+    end
+  end
+end
 
 def editable_files
   @editable_file ||= (
@@ -18,15 +36,15 @@ end
 
 task :default => :package
 
-task :package => %w[ prototype postinstall make_relocatable ] do
+task :package => PROTOTYPES + %w[ postinstall make_relocatable ] do
   pwd = Dir.pwd
-  %w[ ruby rubydoc rubytk ].each do |pkg|
+  PACKAGES.each do |pkg|
     sh "pkgmk -f prototype.#{pkg} -o -r #{TMP_DIR}/opt/local -a `uname -p` -d #{pwd}/pkg"
     sh "pkgtrans -s #{pwd}/pkg #{pwd}/pkg/YUGUI#{pkg}.pkg YUGUI#{pkg}"
   end
 end
 
-task :make_relocatable do
+task :make_relocatable => 'build.timestamp' do
   editable_files.each do |path|
     path = File.join(TMP_DIR, 'opt', 'local', path)
     contents = File.read(path).gsub('/opt/local', '##PREFIX##')
@@ -34,14 +52,20 @@ task :make_relocatable do
   end
 end
 
-task :postinstall do
+file 'postinstall' => ['postinstall.erb', 'Rakefile'] do
   erb = ERB.new(File.read("postinstall.erb"))
   File.open("postinstall", "w"){|f| f.write erb.result }
 end
 
-#task :prototype => :build do
+PROTOTYPES.each do |name|
+  file name => "build.timestamp" do
+    Rake::Task[:prototype].invoke
+  end
+end
+
 task :prototype do
-  File.open("prototype.ruby", "w"){|ruby|
+  specs = PROTOTYPES.map{|name| [name, "w"] }
+  open_files(*specs){|ruby, rubydoc, rubytk, rubydev, goruby|
     ruby.write <<-EOS.gsub(/^\s+/, '')
       i pkginfo=./pkginfo.ruby
       i depend=./depend.ruby
@@ -49,51 +73,55 @@ task :prototype do
       i postinstall=./postinstall
     EOS
 
-    File.open("prototype.rubydoc", "w"){|rubydoc|
-      rubydoc.write <<-EOS.gsub(/^\s+/, '')
-        i pkginfo=./pkginfo.rubydoc
-        i depend=./depend.rubydoc
+    [ [rubydoc, "rubydoc"], [rubytk, "rubytk"], [rubydev, "rubydev"], [goruby, "goruby"] ].each do |out, suffix|
+      out.write <<-EOS.gsub(/^\s+/, '')
+        i pkginfo=./pkginfo.#{suffix}
+        i depend=./depend.#{suffix}
         i copyright=ruby-#{TARGET_VERSION}/COPYING
       EOS
+    end
 
-      File.open("prototype.rubytk", "w"){|rubytk|
-        rubytk.write <<-EOS.gsub(/^\s+/, '')
-          i pkginfo=./pkginfo.rubytk
-          i depend=./depend.rubytk
-          i copyright=ruby-#{TARGET_VERSION}/COPYING
-        EOS
-
-        IO.popen("find #{TMP_DIR}/opt/local | pkgproto", "r"){|pipe|
-          pipe.each do |line|
-            next if /d none #{TMP_DIR} [0-7]{4} \w+ \w+/ =~ line
-            next if /d none #{TMP_DIR}\/opt [0-7]{4} \w+ \w+/ =~ line
-            next if /d none #{TMP_DIR}\/opt\/local [0-7]{4} \w+ \w+/ =~ line
-    
-            # work around for 1.9.2-p0
-            next if %r[share/ri/1.9.1/system/IRB/\(MagicFile = ] =~ line
-            next if %r[share/ri/1.9.1/system/Set/dig = ] =~ line
-    
-            line = line.sub("#{TMP_DIR}/opt/local/", '')
-            line = line.sub(/([0-7]{4}) \w+ \w+/, '\1 root root')
-
-            out = case line
-                  when %r[share/ri] then rubydoc
-                  when %r[lib/ruby/1.9.1/tk] then rubytk
-                  when %r[tcltklib.so] then rubytk
-                  when %r[tkutil.so] then rubytk
-                  else ruby
-                  end
-    
-            if editable_files.any?{|path| line == "f none #{path} 0755 root root\n" }
-              out.write line.sub(/^f/, 'e')
-            else
-              out.write line
-            end
+    IO.popen("find #{TMP_DIR}/opt/local | pkgproto", "r"){|pipe|
+      pipe.each do |line|
+        if reloc_path = line[/^[bcdefilpsvx] \w+ (.+?) [0-7]{4} \w+ \w+$/, 1]
+          case reloc_path
+          when TMP_DIR, "#{TMP_DIR}/opt", "#{TMP_DIR}/opt/local"
+            next
+          when /\s/ # work around for 1.9.2-p0; rdoc generates files whose paths contain SPs.
+            next
           end
-        }
-      }
+
+          pat = %r[#{TMP_DIR}/opt/local/]o
+          line[pat] = reloc_path[pat] = ""
+
+          out = case reloc_path
+                when %r[^share/ri] then 
+                  rubydoc
+                when %r[^lib/ruby/1\.9\.1/tk], %r[/tcltklib\.so$], %r[/tkutil\.so$] then
+                  rubytk
+                when %r[^include/ruby], %r[^lib/ruby/1\.9\.1/mkmf\.rb], %r[^lib/libruby-static\.a] then
+                  rubydev
+                when %r[^bin/goruby], %r[^share/man/man1/goruby\.1] then 
+                  goruby
+                else 
+                  ruby
+                end
+
+          line[/\w+ \w+$/] = "root root"
+          if editable_files.include?(reloc_path)
+            out.write line.sub(/^f/, 'e')
+          else
+            out.write line
+          end
+        end
+      end
     }
   }
+end
+
+file 'build.timestamp' => ['Rakefile', TARBALL] do
+  Rake::Task[:build].invoke
+  touch 'build.timestamp'
 end
 
 task :build => TARBALL do
@@ -105,6 +133,7 @@ task :build => TARBALL do
   Dir.chdir(dir){
     sh "./configure --prefix=/opt/local CC=cc MAKE=make --with-opt-dir=/opt/csw --enable-shared"
     sh "make"
+    sh "make golf"
     sh "make install DESTDIR=#{TMP_DIR}"
   }
 end

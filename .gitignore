@@ -4,3 +4,4 @@
 /ruby-?.?.?-p*.tar.gz
 /ruby-?.?.?-p*
 /destroot
+/build.timestamp
