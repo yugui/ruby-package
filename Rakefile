@@ -81,6 +81,7 @@ task :prototype do
       EOS
     end
 
+    pat = %r[#{TMP_DIR}/opt/local/]o
     IO.popen("find #{TMP_DIR}/opt/local | pkgproto", "r"){|pipe|
       pipe.each do |line|
         if reloc_path = line[/^[bcdefilpsvx] \w+ (.+?) [0-7]{4} \w+ \w+$/, 1]
@@ -91,7 +92,6 @@ task :prototype do
             next
           end
 
-          pat = %r[#{TMP_DIR}/opt/local/]o
           line[pat] = reloc_path[pat] = ""
 
           out = case reloc_path
@@ -113,6 +113,9 @@ task :prototype do
           else
             out.write line
           end
+        else
+          line[pat] = ""
+          ruby.write line
         end
       end
     }
