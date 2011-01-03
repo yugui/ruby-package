@@ -1,4 +1,4 @@
-TARGET_VERSION = '1.9.2-p0'.freeze
+TARGET_VERSION = '1.9.2-p136'.freeze
 
 TMP_DIR = File.expand_path('./destroot').freeze
 TARBALL = "ruby-#{TARGET_VERSION}.tar.gz".freeze
@@ -32,6 +32,10 @@ def editable_files
       lib/ruby/1.9.1/#{platform}/rbconfig.rb
     ]
   )
+end
+
+def src_dir
+  "ruby-#{TARGET_VERSION}"
 end
 
 task :default => :package
@@ -127,13 +131,15 @@ file 'build.timestamp' => ['Rakefile', TARBALL] do
   touch 'build.timestamp'
 end
 
-task :build => TARBALL do
+task :clean do
   rm_rf TMP_DIR
-  dir = "ruby-#{TARGET_VERSION}"
+  rm_rf src_dir
+end
 
-  rm_rf dir
+task :build => [TARBALL, :clean] do
+  rm_rf src_dir
   sh "gzip -dc #{TARBALL} | tar xf -"
-  Dir.chdir(dir){
+  Dir.chdir(src_dir){
     sh "./configure --prefix=/opt/local CC=cc MAKE=make --with-opt-dir=/opt/csw --enable-shared"
     sh "make"
     sh "make golf"
